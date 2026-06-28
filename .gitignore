@@ -2,3 +2,5 @@
 *.swp
 *.swo
 *.swn
+
+schedule-reboots-prod.sh

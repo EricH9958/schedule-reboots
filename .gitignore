@@ -1,6 +1,4 @@
-*~
-*.swp
-*.swo
-*.swn
-
-schedule-reboots-prod.sh
+# Production-only and local variants
+schedule-reboots-prod.sh*
+tautulli-kill-streams
+tautulli-kill-streams-test

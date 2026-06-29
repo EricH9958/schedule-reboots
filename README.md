@@ -1,91 +1,247 @@
 # schedule-reboots
 
-Bash script for Ubuntu 24.04 that schedules staged reboots for two servers using `at`. The script is run on the primary server and uses SSH key-based access to queue a later reboot on the secondary server.
+Staged reboot and maintenance scripts for two Ubuntu 24.04 servers, with optional Plex session termination through Tautulli.
 
-## Features
+This repository contains public, anonymized example scripts based on a real maintenance workflow where one primary server schedules and coordinates maintenance tasks for itself and a second server.
 
-- Schedule reboot jobs for two servers in one run.
-- Cancel all queued `at` jobs on both servers from the same script.
-- Prompt-based interface with default answers for date, hour, minute, and AM/PM selection.
-- 12-hour time entry with numeric AM/PM menu selection.
-- Confirmation output in `MM/DD/YYYY HH:MM AM/PM` format before jobs are queued.
+## What this does
+
+The main scheduler script can:
+
+- Queue a reboot for Server-1 with `at`
+- Queue a pre-reboot Plex stream termination step through Tautulli
+- Queue a Plex container stop on Server-2
+- Queue a reboot for Server-2 after a configurable delay
+- Cancel all queued maintenance jobs on both servers
+
+The Tautulli helper script can:
+
+- Kill all active Plex sessions with a custom message
+- Kill only a specific user's active Plex sessions with a custom message
+
+## Repository layout
+
+```text
+schedule-reboots/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── docs/
+└── scripts/
+    ├── schedule-reboots.sh
+    └── tautulli-kill-streams.sh
+```
+
+## Scripts
+
+### `scripts/schedule-reboots.sh`
+
+Interactive staged reboot scheduler for two Ubuntu 24.04 servers.
+
+Features:
+
+- Prompts for reboot date and time
+- Supports defaults for tomorrow, 1:00 AM, and a reboot gap
+- Schedules Server-1 first
+- Schedules stream termination before reboot
+- Schedules Plex container stop before reboot
+- Sends the Server-2 reboot from Server-1 over SSH
+- Can cancel all queued `at` jobs on both systems
+
+### `scripts/tautulli-kill-streams.sh`
+
+Tautulli helper script for terminating active Plex sessions.
+
+Modes:
+
+- `--all` kills every active stream
+- `--user username` kills only matching active streams
+- `--message "text"` changes the message shown when the session is terminated
 
 ## Requirements
 
-- Ubuntu 24.04 on both servers.
-- `at` installed on both servers and `atd` enabled and running.
-- SSH key-based access from the primary server to the secondary server.
-- Root access on the primary server to run the script and queue the local reboot job.
+These scripts are written for **Ubuntu 24.04**.
 
-## Installation
+### Server requirements
 
-Copy the script to a root-owned admin path such as:
+- Two Ubuntu 24.04 servers
+- `at` installed and enabled
+- Docker installed if you are using the Plex stop step
+- Key-based SSH from Server-1 to Server-2
+- A sudo rule on Server-2 that allows the remote user to run reboot non-interactively
+- Tautulli with API access if you are using the Plex stream termination step
+
+### Required commands
+
+The scheduler expects these commands to exist:
+
+- `at`
+- `atq`
+- `atrm`
+- `date`
+- `ssh`
+- `systemctl`
+- `hostname`
+- `logger`
+- `docker`
+
+The Tautulli helper expects:
+
+- `curl`
+- `jq`
+
+## Install dependencies
+
+On Ubuntu 24.04, install the required packages:
 
 ```bash
-/usr/local/sbin/schedule-reboots.sh
-chmod 700 /usr/local/sbin/schedule-reboots.sh
+sudo apt update
+sudo apt install -y at openssh-client curl jq
 ```
 
-Install and enable `atd` on both servers:
+### Additional prerequisites  
 
-```bash
-apt update
-apt install -y at
-systemctl enable --now atd
-```
+- Docker must already be installed on the server that manages Plex.
+- The `atd` service must be enabled and running:
+  ```bash
+  sudo systemctl enable --now atd
+  ```
+- Key-based SSH from Server-1 to Server-2 must already be configured.
+- A sudo rule on Server-2 must allow the remote user to run:
+  ```bash
+  sudo -n /usr/bin/systemctl reboot
+  ```
+- Tautulli must be reachable and API access must be enabled.
 
-## Configuration
+## Before use
 
-Edit these variables in the script for the target environment:
+These scripts are **examples** and must be edited for your own environment.
+
+### Update the scheduler script
+
+Edit these variables in `scripts/schedule-reboots.sh`:
 
 - `S2_HOST`
 - `S2_PORT`
 - `S2_USER`
 - `S2_KEY`
-- `DEFAULT_GAP_MINUTES`
+- `S2_KILL_SCRIPT`
+- `S2_PLEX_CONTAINER`
 
-For a public GitHub repo, replace real usernames, hostnames, IP addresses, and key paths with generic placeholders before publishing.
+Also review:
+
+- The default reboot gap
+- The maintenance message
+- The hostname check
+- Any local script paths
+
+### Update the Tautulli script
+
+Edit these variables in `scripts/tautulli-kill-streams.sh`:
+
+- `TAUTULLI_URL`
+- `TAUTULLI_API_KEY`
+
+## Important behavior
+
+### Plex restart policy
+
+If your maintenance flow stops Plex before reboot, your Docker restart policy matters.
+
+For example:
+
+- `restart: unless-stopped` means Plex will stay down after reboot if you stopped it manually before the reboot
+- `restart: always` means Plex will be brought back automatically after reboot even if it was stopped beforehand
+
+### Tautulli message behavior
+
+The stream termination helper works by calling Tautulli's session termination API.
+
+That means:
+
+- it can show a message when ending a stream
+- it does **not** provide a warning-only in-player popup
+- warning-only notifications would need a separate notification flow
+
+## Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/EricH9958/schedule-reboots.git
+cd schedule-reboots
+```
+
+Make the public scripts executable:
+
+```bash
+chmod 755 scripts/schedule-reboots.sh scripts/tautulli-kill-streams.sh
+```
+Before running the scripts, edit the placeholder values described in the **Before use** section.
 
 ## Usage
 
-Run the script on the primary server as root:
+### Run the staged reboot scheduler
+
+Run as root on Server-1:
 
 ```bash
-/usr/local/sbin/schedule-reboots.sh
+sudo ./scripts/schedule-reboots.sh
 ```
 
-At startup, choose one of these activities:
+The script will prompt you to:
 
-- `1` to schedule reboot jobs.
-- `2` to cancel all queued `at` jobs on both servers.
+- schedule reboot jobs, or
+- cancel all queued jobs
 
-### Schedule mode
+### Kill all active Plex streams
 
-The script prompts for:
+```bash
+sudo ./scripts/tautulli-kill-streams.sh --all --message "Scheduled maintenance in progress. Playback has been stopped."
+```
 
-- Default date or a custom date.
-- Default hour or a custom hour.
-- Default minute or a custom minute.
-- Default AM/PM or a numeric menu choice, `1` for AM and `2` for PM.
-- Minutes between the primary and secondary reboot times.
+### Kill streams for one user only
 
-It then shows a summary like:
+```bash
+sudo ./scripts/tautulli-kill-streams.sh --user someuser --message "Scheduled maintenance in progress. Playback has been stopped."
+```
 
-- `06/29/2026 01:00 PM`
-- `06/29/2026 01:15 PM`
+## Suggested test workflow
 
-before asking for final confirmation.
+Before trusting the scheduler in production:
 
-### Cancel mode
+1. Confirm SSH from Server-1 to Server-2 works with the configured key.
+2. Confirm the remote user on Server-2 can run:
+   ```bash
+   sudo -n /usr/bin/systemctl reboot
+   ```
+3. Confirm Tautulli can see active Plex sessions.
+4. Test the Tautulli helper script manually against a test stream.
+5. Test the scheduler with a short maintenance window.
 
-Cancel mode displays queued `at` jobs on both servers, asks for confirmation, and removes all queued jobs from both systems. This design assumes the script is the only workflow using `at` on those servers.
+## Safety notes
 
-## Notes
+These scripts can:
 
-- `at` may print `warning: commands will be executed using /bin/sh`; this is normal behavior, not an error.
-- The script depends on successful SSH access from the primary server to the secondary server using the configured key path.
-- The reboot order is primary server first, then secondary server after the configured gap.
+- terminate active Plex sessions
+- stop Docker containers
+- reboot systems
+- cancel queued `at` jobs
+
+Review them carefully before use in any environment.
+
+## Public vs private files
+
+This repository is intended to contain the **anonymized public versions** of the scripts.
+
+Do not commit::
+
+- real internal IP addresses
+- real SSH key paths
+- API keys
+- production-only backup scripts
+- environment-specific private files
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+This repository includes a license file at the repository root. GitHub recommends adding a license so others know how they may use, modify, and distribute the code.
